@@ -35,7 +35,7 @@
         get_loglevel/1, get_loglevel/2, set_loglevel/2, set_loglevel/3, set_loglevel/4, get_loglevels/1,
         update_loglevel_config/1, posix_error/1, set_loghwm/2, set_loghwm/3, set_loghwm/4,
         safe_format/3, safe_format_chop/3, unsafe_format/2, dispatch_log/5, dispatch_log/7, dispatch_log/9,
-        do_log/9, do_log/10, do_log_unsafe/10, pr/2, pr/3, pr_stacktrace/1, pr_stacktrace/2]).
+        do_log/9, do_log/10, do_log_unsafe/10, do_log_custom/11, do_log_custom_unsafe/11, pr/2, pr/3, pr_stacktrace/1, pr_stacktrace/2]).
 
 -type log_level() :: none | debug | info | notice | warning | error | critical | alert | emergency.
 -type log_level_number() :: 0..7.
@@ -102,9 +102,8 @@ dispatch_log(Sink, Severity, Metadata, Format, Args, Size, Safety) when is_atom(
     end.
 
 %% @private Should only be called externally from code generated from the parse transform
-do_log(Severity, Metadata, Format, Args, Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid) when is_atom(Severity) ->
-    FormatFun = fun() -> safe_format_chop(Format, Args, Size) end,
-    do_log_impl(Severity, Metadata, Format, Args, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, FormatFun).
+do_log(Severity, _, Format, Args, Size, _, _, _, _, _) when is_atom(Severity) ->
+    fun() -> safe_format_chop(Format, Args, Size) end.
 
 do_log_impl(Severity, Metadata, Format, Args, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, FormatFun) ->
     {Destinations, TraceSinkPid} = case TraceFilters of
@@ -141,8 +140,15 @@ do_log_impl(Severity, Metadata, Format, Args, SeverityAsInt, LevelThreshold, Tra
 
 %% @private Should only be called externally from code generated from the parse transform
 %% Specifically, it would be level ++ `_unsafe' as in `info_unsafe'.
-do_log_unsafe(Severity, Metadata, Format, Args, _Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid) when is_atom(Severity) ->
-    FormatFun = fun() -> unsafe_format(Format, Args) end,
+do_log_unsafe(Severity, _, Format, Args, _, _, _, _, _, _) when is_atom(Severity) ->
+    fun() -> unsafe_format(Format, Args) end.
+
+do_log_custom(Severity, Metadata, Format, Args, _Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, OverrideModule) when is_atom(Severity) ->
+    FormatFun = OverrideModule:do_log(Severity, Metadata, Format, Args, _Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid),
+    do_log_impl(Severity, Metadata, Format, Args, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, FormatFun).
+
+do_log_custom_unsafe(Severity, Metadata, Format, Args, _Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, OverrideModule) when is_atom(Severity) ->
+    FormatFun = OverrideModule:do_log_unsafe(Severity, Metadata, Format, Args, _Size, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid),
     do_log_impl(Severity, Metadata, Format, Args, SeverityAsInt, LevelThreshold, TraceFilters, Sink, SinkPid, FormatFun).
 
 

@@ -32,9 +32,14 @@ parse_transform(AST, Options) ->
     TruncSize = proplists:get_value(lager_truncation_size, Options, ?DEFAULT_TRUNCATION),
     Enable = proplists:get_value(lager_print_records_flag, Options, true),
     Sinks = [lager] ++ proplists:get_value(lager_extra_sinks, Options, []),
+    DoLogOverrides = [
+      {lager_util:make_internal_sink_name(Sink), Module} ||
+      {Sink, Module} <- proplists:get_value(lager_do_log_override_modules, Options, [])
+    ],
     put(print_records_flag, Enable),
     put(truncation_size, TruncSize),
     put(sinks, Sinks),
+    put(do_log_override_modules, DoLogOverrides),
     erlang:put(records, []),
     %% .app file should either be in the outdir, or the same dir as the source file
     guess_application(proplists:get_value(outdir, Options), hd(AST)),
@@ -180,11 +185,25 @@ do_transform(Line, SinkName, Severity, Arguments0, Safety) ->
     LevelVar = make_varname("__Level", Line),
     TracesVar = make_varname("__Traces", Line),
     PidVar = make_varname("__Pid", Line),
-    LogFun = case Safety of
-                 safe ->
-                     do_log;
-                 unsafe ->
-                     do_log_unsafe
+
+    DefaultCallArgs = [{atom,Line,Severity},
+                          Meta,
+                          Message,
+                          Arguments,
+                          {integer, Line, get(truncation_size)},
+                          {integer, Line, SeverityAsInt},
+                          {var, Line, LevelVar},
+                          {var, Line, TracesVar},
+                          {atom, Line, SinkName},
+                          {var, Line, PidVar}],
+
+    LogModule = proplists:get_value(SinkName, get(do_log_override_modules), lager),
+
+    {LogFun, CallArgs} = case {LogModule, Safety} of
+                 {_, safe} ->
+                     {do_log_custom, DefaultCallArgs ++ [{atom, Line, LogModule}]};
+                 {_, unsafe} ->
+                     {do_log_custom_unsafe, DefaultCallArgs ++ [{atom, Line, LogModule}]}
              end,
     %% Wrap the call to lager:dispatch_log/6 in case that will avoid doing any work if this message is not elegible for logging
     %% See lager.erl (lines 89-100) for lager:dispatch_log/6
@@ -223,17 +242,7 @@ do_transform(Line, SinkName, Severity, Arguments0, Safety) ->
                   [[{op, Line, 'orelse',
                     {op, Line, '/=', {op, Line, 'band', {var, Line, LevelVar}, {integer, Line, SeverityAsInt}}, {integer, Line, 0}},
                     {op, Line, '/=', {var, Line, TracesVar}, {nil, Line}}}]],
-                  [{call,Line,{remote, Line, {atom, Line, lager}, {atom, Line, LogFun}},
-                         [{atom,Line,Severity},
-                          Meta,
-                          Message,
-                          Arguments,
-                          {integer, Line, get(truncation_size)},
-                          {integer, Line, SeverityAsInt},
-                          {var, Line, LevelVar},
-                          {var, Line, TracesVar},
-                          {atom, Line, SinkName},
-                          {var, Line, PidVar}]}]},
+                  [{call,Line,{remote, Line, {atom, Line, lager}, {atom, Line, LogFun}}, CallArgs}]},
           %% _ -> ok
           {clause,Line,[{var,Line,'_'}],[],[{atom,Line,ok}]}]}.
 
