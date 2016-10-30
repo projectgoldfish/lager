@@ -178,7 +178,9 @@ do_transform(Line, SinkName, Severity, Arguments0, Safety) ->
                                                    {DefaultAttrs, Arg1, Arg2}
                                            end;
                                        [Attrs, Format, Args] ->
-                                           {concat_lists(Attrs, DefaultAttrs), Format, Args}
+                                           Attrs2 = {tuple, Line, [{atom, Line, values}, transform_attrs(Attrs)]},
+                                           Attrs3 = {cons, Line, Attrs2, Attrs},
+                                           {concat_lists(Attrs3, DefaultAttrs), Format, Args}
                                    end,
     %% Generate some unique variable names so we don't accidentally export from case clauses.
     %% Note that these are not actual atoms, but the AST treats variable names as atoms.
@@ -245,6 +247,20 @@ do_transform(Line, SinkName, Severity, Arguments0, Safety) ->
                   [{call,Line,{remote, Line, {atom, Line, lager}, {atom, Line, LogFun}}, CallArgs}]},
           %% _ -> ok
           {clause,Line,[{var,Line,'_'}],[],[{atom,Line,ok}]}]}.
+
+transform_attrs({nil, _} = T) -> T;
+transform_attrs({cons, Line, H, T}) ->
+  {cons, Line, transform_attr(H), transform_attrs(T)}.
+
+transform_attr({var, Line, Atom}=Attr) ->
+  transformed_attr(variable, Line, atom_to_list(Atom), Attr);
+transform_attr({cons, Line, _, _}=Attr) ->
+  transformed_attr(list, Line, "literal", Attr);
+transform_attr({Type, Line, _}=Attr) ->
+  transformed_attr(Type, Line, "literal", Attr).
+
+transformed_attr(Type, Line, Name, Attr) ->
+  {tuple,Line,[{atom,Line,Type},{string,Line,Name},Attr]}.
 
 make_varname(Prefix, Line) ->
     list_to_atom(Prefix ++ atom_to_list(get(module)) ++ integer_to_list(Line)).
